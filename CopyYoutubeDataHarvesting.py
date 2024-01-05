@@ -1,7 +1,7 @@
-
 from googleapiclient.discovery import build
 import pymongo
 import mysql.connector
+from mysql.connector import errorcode
 import pandas as pd
 from pymongo import MongoClient
 import streamlit as st
@@ -144,8 +144,6 @@ mycursor.execute("CREATE DATABASE if not exists youtube_details")
 
 # Creation and insertion values into channel table
 def channel_tab():
-    drop_query = '''drop table if exists channeldata'''
-    mycursor.execute(drop_query)
     mycursor.execute('''CREATE TABLE if not exists channeldata(channel_name VARCHAR(100),
                                                                 channel_id VARCHAR(100) primary key,
                                                                 channel_description TEXT,
@@ -179,10 +177,34 @@ def channel_tab():
     mydb.commit()
 
 
+def new_channel_tab():
+    channels_list = []
+    for chdata in collection.find({temp_channel_id}, {"_id": 0, "channel_info": 1}):
+        channels_list.append(chdata["channel_info"])
+    df = pd.DataFrame(channels_list)
+    for index, row in df.iterrows():
+        insert_query = '''insert into channeldata(channel_name,
+                                                    channel_id,
+                                                    channel_description,
+                                                    channel_published,
+                                                    channel_playlist,
+                                                    channel_scount,
+                                                    channel_vcount,
+                                                    channel_viewcount)values(%s,%s,%s,%s,%s,%s,%s,%s)'''
+        values = (row['channel_name'],
+                  row['channel_id'],
+                  row['channel_description'],
+                  row['channel_published'].replace("T", " ").replace("Z", " "),
+                  row['channel_playlist'],
+                  row['channel_scount'],
+                  row['channel_vcount'],
+                  row['channel_viewcount'])
+        mycursor.execute(insert_query, values)
+    mydb.commit()
+
+
 # Creation and insertion values into video table
 def video_tab():
-    drop_query = '''drop table if exists videodata'''
-    mycursor.execute(drop_query)
     mycursor.execute('''CREATE TABLE if not exists videodata(channel_name VARCHAR(100),
                                                                 channel_id VARCHAR(100),
                                                                 video_id VARCHAR(100) primary key,
@@ -239,8 +261,6 @@ def video_tab():
 
 # creation and insertion values into comments table
 def comnt_tab():
-    drop_query = '''drop table if exists comments'''
-    mycursor.execute(drop_query)
     mycursor.execute('''CREATE TABLE if not exists comments(comment_Id varchar(100) primary key,
                                                               Video_id varchar(100),
                                                               Comment_Text text,
@@ -270,6 +290,13 @@ def tables():
     channel_tab()
     video_tab()
     comnt_tab()
+    return 'Tables Created'
+
+
+def copy_tables():
+    new_channel_tab()
+    new_video_tab()
+    new_comnt_tab()
     return 'Tables Created'
 
 
@@ -309,6 +336,7 @@ def show_comnt_tab():
 
 st.title(':blue[YouTube Data Harvesting and Warehousing] ')
 channel_id = st.text_input("Enter the channel ID")
+temp_channel_id = channel_id
 channels = channel_id.split(',')
 channels = [ch.strip() for ch in channels if ch]
 
@@ -345,8 +373,11 @@ with col1:
 
 with col2:
     if st.button('Migrate to Sql'):
-        Display = tables()
-        st.success(Display)
+        try:
+            data = mycursor.execute('''select count(*) from channeldata''')
+        except mysql.connector.Error as e:
+            Display = tables()
+            st.success(Display)
 
 show = st.radio('SELECT THE TABLE FOR VIEW',
                 ('CHANNELS', 'VIDEOS', 'COMMENTS'))
@@ -368,7 +399,8 @@ mydb = mysql.connector.connect(
 mycursor = mydb.cursor()
 
 
-Question = st.selectbox("select your Question", ('1.What are the names of all the videos and their corresponding channels?',
+Question = st.selectbox("select your Question", (' ',
+                                                 '1.What are the names of all the videos and their corresponding channels?',
                                                  '2.Which channels have the most number of videos, and how many videos do they have?',
                                                  '3.What are the top 10 most viewed videos and their respective channels?',
                                                  '4.How many comments were made on each video, and what are their corresponding video names?',
@@ -470,3 +502,6 @@ if Question == '10.Which videos have the highest number of comments, and what ar
     t10 = mycursor.fetchall()
     st.write(pd.DataFrame(t10, columns=[
              "video_name", "channel_name", "comment_count"]))
+
+if Question == ' ':
+    st.write("Please Select Questions from the Dropdown")
